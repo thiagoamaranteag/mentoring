@@ -1,0 +1,18 @@
+# Ignore the virtual environment directory
+dev/
+.venv/
+
+# Config keys
+.env
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore the requirements file (if you don't want to version it)
+# requirements.txt
+
+# Ignore other common Python files
+*.pyo
+*.pyd
+*.pdb
