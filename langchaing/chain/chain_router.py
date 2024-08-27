@@ -5,6 +5,15 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from dotenv import load_dotenv
 load_dotenv()
+import certifi
+
+# Carregar o certificado SSL
+cert_path = '../zscaler.pem'
+with open(cert_path, 'rb') as cert_file:
+    zscaler_cert = cert_file.read()
+certifi_path = certifi.where()
+with open(certifi_path, 'ab') as certifi_file:
+    certifi_file.write(zscaler_cert)
 
 # MultiPromptChain foi depreciado e evoluiu para utilizar LCEL (LangChain Expression Language)
 
@@ -22,12 +31,10 @@ prompt_quimica = ChatPromptTemplate.from_template("Você é um professor de quí
 
 # Prompt para o roteador
 router_template = """Dado a entrada do usuário, selecione a área mais apropriada:
-
 Input: {input}
-
 Responda apenas com o nome da área (fisica, matematica, ou quimica). Se nenhuma destas áreas for apropriada, responda com 'geral'.
-
 Área:"""
+
 router_prompt = ChatPromptTemplate.from_template(router_template)
 
 # Definindo o roteador
