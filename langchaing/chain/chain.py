@@ -16,4 +16,4 @@ class StringFormatterCuston(Runnable):
 
 chain = prompt | model | StrOutputParser() | StringFormatterCuston()
 
-chain.invoke({"topic": "abelhas"})
+chain.invoke({"topic": "carros antigos"})

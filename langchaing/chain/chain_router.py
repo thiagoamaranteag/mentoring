@@ -61,5 +61,5 @@ def route(input_dict):
 chain = RunnablePassthrough() | RunnableLambda(route) | RunnablePassthrough()
 
 # Usando a cadeia
-resposta = chain.invoke("Porque objetos em movimento tem a massa maior?")
+resposta = chain.invoke("Qual estilo muiscal mais ouvido no centro oeste do Brasil?")
 print(resposta)
