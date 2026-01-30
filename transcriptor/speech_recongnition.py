@@ -1,6 +1,7 @@
 # pip install SpeechRecognition pydub
 
 import os
+import sys
 import math
 import datetime
 import speech_recognition as sr
@@ -118,6 +119,24 @@ def processar(audio_file):
 
 if __name__ == "__main__":
     
-    path_file = input("Diretorio do arquivo de audio .WAV: ")
+    # Verifica se foi fornecido o argumento do arquivo
+    if len(sys.argv) != 2:
+        log("ERRO: Uso incorreto do script.")
+        log("Uso correto: python speech_recongnition.py <arquivo.wav>")
+        log("Exemplo: python speech_recongnition.py aula_19_1.wav")
+        exit(1)
+    
+    path_file = sys.argv[1]
+    
+    # Verifica se o arquivo existe
+    if not os.path.exists(path_file):
+        log(f"ERRO: Arquivo '{path_file}' não encontrado.")
+        log("Certifique-se de fornecer o caminho correto do arquivo.")
+        exit(1)
+    
+    # Verifica se é um arquivo .wav
+    if not path_file.lower().endswith('.wav'):
+        log(f"ERRO: '{path_file}' não é um arquivo .wav")
+        exit(1)
     
     processar(path_file)
