@@ -16,10 +16,10 @@ def comparar_frases(frase1, frase2):
     # Compara tokens de duas frases e mostra sobreposição
     encoding = tiktoken.encoding_for_model("gpt-4")
     
-    tokens1 = set(encoding.encode(frase1))
-    tokens2 = set(encoding.encode(frase2))
+    tokens1 = encoding.encode(frase1)
+    tokens2 = encoding.encode(frase2)
     
-    sobreposicao = tokens1.intersection(tokens2)
+    sobreposicao = set(tokens1).intersection(tokens2)
     
     print(f"Frase 1: {frase1}")
     print(f"Tokens: {len(tokens1)}")
