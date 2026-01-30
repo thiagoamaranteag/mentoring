@@ -12,7 +12,7 @@ def texto_para_tokens(texto):
     return tokens
 
 
-def comparar_frases(frase1):
+def comparar_frases(frase1, frase2):
     # Compara tokens de duas frases e mostra sobreposição
     encoding = tiktoken.encoding_for_model("gpt-4")
     
@@ -30,12 +30,10 @@ def comparar_frases(frase1):
     print(f"Tokens em comum: {len(sobreposicao)}")
     print(f"Tokens sobrepostos: {sobreposicao}")
 
-# EXEMPLO DE USO
+
 if __name__ == "__main__":
-    # Testando primeira função
     texto_para_tokens("StackSpot AI é uma plataforma incrível para desenvolvedores.")
     
-    # Testando segunda função
     comparar_frases(
         "ZUP Innovation é uma empresa brasileira.",
         "Brasil é um país com grande potencial tecnologico."
