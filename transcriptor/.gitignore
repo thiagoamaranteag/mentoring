@@ -8,3 +8,5 @@ dist/
 
 # FFmpeg
 ffmpeg/
+ffmpeg.exe
+ffprobe.exe
