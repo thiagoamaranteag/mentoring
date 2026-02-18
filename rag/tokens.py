@@ -12,7 +12,7 @@ def texto_para_tokens(texto):
     return tokens
 
 
-def comparar_frases(frase1):
+def comparar_frases(frase1, frase2):
     # Compara tokens de duas frases e mostra sobreposição
     encoding = tiktoken.encoding_for_model("gpt-4")
     
