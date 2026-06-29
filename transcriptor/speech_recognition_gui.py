@@ -3,8 +3,10 @@ import os
 import shutil
 import sys
 import math
+import re
 import datetime
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, scrolledtext
 import speech_recognition as sr
@@ -68,6 +70,10 @@ LIMITE_SILENCIO_MS = 1000
 VOLUME_SILENCIO_DBFS = -40
 KEEP_SILENCE_MS = 200
 GOOGLE_SEGMENTO_S = 50
+# Resiliência contra bloqueio/throttling do endpoint gratuito do Google
+GOOGLE_MAX_RETRIES = 5        # tentativas por subtrecho antes de desistir
+GOOGLE_BACKOFF_BASE_S = 3     # base do backoff exponencial (3, 6, 12, 24...)
+GOOGLE_PAUSA_ENTRE_REQS_S = 1 # pausa entre requisições para evitar throttling
 
 FORMATOS_SUPORTADOS = {
     'wav': 'wav', 'mp3': 'mp3', 'mp4': 'mp4', 'mkv': 'matroska',
@@ -380,6 +386,27 @@ class TranscritorApp:
         except Exception as e:
             raise Exception(f"Erro ao carregar arquivo: {str(e)}")
 
+    def caminho_transcricao(self) -> str:
+        """Caminho do arquivo .txt de transcrição do áudio atual."""
+        return f"{self.audio_file}_transcription.txt"
+
+    def trechos_concluidos(self, transcription_file: str) -> set:
+        """Lê o arquivo de transcrição e retorna o conjunto de números de trecho
+        já gravados (1-based), permitindo retomar de onde parou."""
+        concluidos = set()
+        if not os.path.exists(transcription_file):
+            return concluidos
+        padrao = re.compile(r"^Trecho\s+(\d+)\s*\(")
+        try:
+            with open(transcription_file, "r", encoding="utf-8") as f:
+                for linha in f:
+                    m = padrao.match(linha.strip())
+                    if m:
+                        concluidos.add(int(m.group(1)))
+        except Exception as e:
+            self.log(f"⚠️ Não foi possível ler transcrição existente: {e}", "warning")
+        return concluidos
+
     def iniciar_processamento(self):
         if self.processing:
             messagebox.showwarning("Aviso", "Já existe um processamento em andamento!")
@@ -387,6 +414,35 @@ class TranscritorApp:
         if not self.audio_file:
             messagebox.showerror("Erro", "Selecione um arquivo primeiro!")
             return
+
+        # ===== Detecção de retomada (resume) =====
+        # Verifica se já existe transcrição parcial e pergunta ao usuário se
+        # deseja continuar de onde parou ou recomeçar do zero.
+        transcription_file = self.caminho_transcricao()
+        self.trechos_para_pular = set()
+        concluidos = self.trechos_concluidos(transcription_file)
+        if concluidos:
+            ultimo = max(concluidos)
+            continuar = messagebox.askyesno(
+                "🔁 Transcrição existente encontrada",
+                f"Já existem {len(concluidos)} trecho(s) transcrito(s) "
+                f"(último: trecho {ultimo}).\n\n"
+                f"Deseja CONTINUAR de onde parou?\n\n"
+                f"• Sim  → retoma a partir do trecho {ultimo + 1}\n"
+                f"• Não  → recomeça do zero (o arquivo atual será apagado)",
+                icon='question')
+            if continuar:
+                self.trechos_para_pular = concluidos
+                self.log(f"🔁 Retomando: {len(concluidos)} trecho(s) já feito(s) serão pulados", "info")
+            else:
+                try:
+                    os.remove(transcription_file)
+                    self.log("🗑️ Transcrição anterior apagada — recomeçando do zero", "warning")
+                except OSError as e:
+                    messagebox.showerror("Erro", f"Não foi possível apagar o arquivo anterior:\n{e}")
+                    self.btn_select.config(state=tk.NORMAL)
+                    self.btn_process.config(state=tk.NORMAL)
+                    return
 
         self.total_chars = 0
         self.chars_label.config(text="0")
@@ -417,8 +473,16 @@ class TranscritorApp:
             self.log(f"📊 Trechos de até 15min: {num_trechos}", "info")
 
             recognizer = sr.Recognizer()
+            transcription_file = self.caminho_transcricao()
+            trechos_para_pular = getattr(self, "trechos_para_pular", set())
 
             for i in range(num_trechos):
+                # Pula trechos já transcritos numa execução anterior (retomada)
+                if (i + 1) in trechos_para_pular:
+                    self.atualizar_progresso(i + 1, num_trechos)
+                    self.log(f"⏭️ Trecho {i+1}/{num_trechos} já transcrito — pulando", "info")
+                    continue
+
                 inicio_ms = i * DURACAO_MAX_TRECHO_MS
                 fim_ms    = min(inicio_ms + DURACAO_MAX_TRECHO_MS, total_ms)
                 faixa     = audio[inicio_ms:fim_ms]
@@ -451,17 +515,34 @@ class TranscritorApp:
                             audio_data = recognizer.record(source, duration=GOOGLE_SEGMENTO_S)
                             if len(audio_data.frame_data) == 0:
                                 break
-                            try:
-                                parte_txt = recognizer.recognize_google(
-                                    audio_data, language=idioma_codigo)
-                                if parte_txt.strip():
-                                    texto_trecho.append(parte_txt.strip())
-                            except sr.UnknownValueError:
-                                self.log("⚠️ Google não entendeu um subtrecho", "warning")
-                                continue
-                            except sr.RequestError as e:
-                                self.log(f"❌ Erro na API Google: {e}", "error")
-                                break
+
+                            # Tenta transcrever o subtrecho com retentativas e backoff
+                            # exponencial — o endpoint gratuito do Google costuma
+                            # derrubar a conexão (WinError 10054) sob carga.
+                            for tentativa in range(1, GOOGLE_MAX_RETRIES + 1):
+                                try:
+                                    parte_txt = recognizer.recognize_google(
+                                        audio_data, language=idioma_codigo)
+                                    if parte_txt.strip():
+                                        texto_trecho.append(parte_txt.strip())
+                                    break  # sucesso → próximo subtrecho
+                                except sr.UnknownValueError:
+                                    self.log("⚠️ Google não entendeu um subtrecho", "warning")
+                                    break  # áudio sem fala reconhecível → não adianta repetir
+                                except (sr.RequestError, ConnectionError, OSError) as e:
+                                    if tentativa < GOOGLE_MAX_RETRIES:
+                                        espera = GOOGLE_BACKOFF_BASE_S * (2 ** (tentativa - 1))
+                                        self.log(
+                                            f"⚠️ Falha na API Google (tentativa {tentativa}/{GOOGLE_MAX_RETRIES}): "
+                                            f"{e} — aguardando {espera}s antes de tentar de novo", "warning")
+                                        time.sleep(espera)
+                                    else:
+                                        self.log(
+                                            f"❌ Subtrecho descartado após {GOOGLE_MAX_RETRIES} tentativas: {e}",
+                                            "error")
+
+                            # Pausa entre requisições para reduzir o risco de throttling
+                            time.sleep(GOOGLE_PAUSA_ENTRE_REQS_S)
                 finally:
                     if os.path.exists(temp_wav):
                         os.remove(temp_wav)
@@ -470,7 +551,6 @@ class TranscritorApp:
                 self.total_chars += len(texto_concatenado)
                 self.chars_label.config(text=f"{self.total_chars:,}")
 
-                transcription_file = f"{self.audio_file}_transcription.txt"
                 with open(transcription_file, "a", encoding="utf-8") as f:
                     f.write(f"\n{'='*60}\n")
                     f.write(f"Trecho {i+1} ({self.ms_to_hhmmss(inicio_ms)} - {self.ms_to_hhmmss(fim_ms)})\n")
